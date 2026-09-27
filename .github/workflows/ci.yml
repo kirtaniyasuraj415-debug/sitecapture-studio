@@ -38,6 +38,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build web image
-        run: docker build -t sitecapture-studio-web:test .
+        run: docker build -t sitecapture-studio-web:local .
       - name: Build worker image
-        run: docker build -t sitecapture-studio-worker:test ./worker
+        run: docker build -t sitecapture-studio-worker:local ./worker
+      - name: Start production compose stack
+        run: docker compose up -d --no-build
+      - name: Wait for stack
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8787/health >/dev/null && curl -fsS http://localhost:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - name: End-to-end screenshot through web API
+        run: |
+          curl -fsS -X POST http://localhost:3000/api/capture/screenshot             -H 'content-type: application/json'             --data '{"url":"https://example.com","deviceId":"desktop-1366","dpr":1,"waitSeconds":0,"format":"png","screenshotType":"viewport"}'             > /tmp/job.json
+          JOB_ID=$(python3 -c 'import json; print(json.load(open("/tmp/job.json"))["id"])')
+          STATUS=""
+          for i in {1..60}; do
+            curl -fsS "http://localhost:3000/api/jobs/$JOB_ID" > /tmp/state.json
+            STATUS=$(python3 -c 'import json; print(json.load(open("/tmp/state.json")).get("status",""))')
+            if [ "$STATUS" = "ready" ]; then break; fi
+            if [ "$STATUS" = "error" ]; then cat /tmp/state.json; exit 1; fi
+            sleep 2
+          done
+          test "$STATUS" = "ready"
+          FILE_ID=$(python3 -c 'import json; print(json.load(open("/tmp/state.json"))["result"]["fileId"])')
+          curl -fsSL "http://localhost:3000/api/files/$FILE_ID" -o /tmp/capture.png
+          python3 -c 'import struct; d=open("/tmp/capture.png","rb").read(24); assert d[:8] == bytes.fromhex("89504e470d0a1a0a"); w,h=struct.unpack(">II",d[16:24]); assert (w,h)==(1366,768), (w,h); print(f"Compose PNG OK: {w}x{h}")'
+      - name: Show compose logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop compose stack
+        if: always()
+        run: docker compose down -v
