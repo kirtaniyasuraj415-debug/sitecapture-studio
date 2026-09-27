@@ -11,11 +11,19 @@ services:
         value: 1
       - key: FILE_TTL_MS
         value: 1800000
+      - key: MAX_QUEUE_LENGTH
+        value: 8
+      - key: MAX_PAGE_TRANSFER_BYTES
+        value: 62914560
+      - key: MAX_OUTPUT_FILE_BYTES
+        value: 104857600
       - key: ENABLE_4K_VIDEO
         value: false
       - key: MAX_VIDEO_RENDER_PIXELS
-        value: 8294400
+        value: 2073600
       - key: MAX_SCREENSHOT_PIXELS
         value: 50000000
-      - key: ALLOWED_ORIGINS
+      - key: CAPTURE_API_KEY
         sync: false
+      - key: ALLOWED_ORIGINS
+        value: http://localhost:3000
