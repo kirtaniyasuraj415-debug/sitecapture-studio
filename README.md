@@ -143,3 +143,5 @@ CAPTURE_WORKER_API_KEY=THE_SAME_SECRET
 ```
 
 The Render Blueprint asks for the worker-side `CAPTURE_API_KEY` without storing the secret in Git.
+
+<!-- CI verification trigger -->
