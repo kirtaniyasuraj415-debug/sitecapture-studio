@@ -7,6 +7,7 @@ COPY package.json ./
 RUN npm install --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build && mkdir -p temp
+RUN npm run build && npm prune --omit=dev && mkdir -p temp && chown -R pwuser:pwuser /app
+USER pwuser
 EXPOSE 8787
 CMD ["node", "dist/server.js"]
