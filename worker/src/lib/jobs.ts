@@ -22,6 +22,7 @@ export class JobStore {
     return job;
   }
   get(id: string) { return this.jobs.get(id); }
+  remove(id: string) { this.jobs.delete(id); }
   update(id: string, patch: Partial<CaptureJob>) {
     const job = this.jobs.get(id); if (!job) return;
     Object.assign(job, patch, { updatedAt: new Date().toISOString() });
@@ -35,15 +36,25 @@ export class JobStore {
 export class JobQueue {
   private pending: Array<() => Promise<void>> = [];
   private active = 0;
-  constructor(private concurrency = 1) {}
-  enqueue(task: () => Promise<void>) { this.pending.push(task); this.drain(); }
+  private maxQueued: number;
+  constructor(private concurrency = 1, maxQueued = 20) { this.maxQueued = Math.max(concurrency, maxQueued); }
+  enqueue(task: () => Promise<void>) {
+    if (this.pending.length + this.active >= this.maxQueued) return false;
+    this.pending.push(task);
+    this.drain();
+    return true;
+  }
+  stats() { return { active: this.active, queued: this.pending.length, capacity: this.maxQueued }; }
   private drain() {
     while (this.active < this.concurrency && this.pending.length) {
-      const task = this.pending.shift()!; this.active++;
+      const task = this.pending.shift()!;
+      this.active++;
       task().catch(() => undefined).finally(() => { this.active--; this.drain(); });
     }
   }
 }
 
 export const jobs = new JobStore();
-export const queue = new JobQueue(Math.max(1, Math.min(2, Number(process.env.CAPTURE_CONCURRENCY || 1))));
+const concurrency = Math.max(1, Math.min(2, Number(process.env.CAPTURE_CONCURRENCY || 1)));
+const maxQueued = Math.max(concurrency, Number(process.env.MAX_QUEUE_LENGTH || 20));
+export const queue = new JobQueue(concurrency, maxQueued);
