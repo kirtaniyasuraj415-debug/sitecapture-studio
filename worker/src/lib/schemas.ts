@@ -27,6 +27,7 @@ export const screenshotSchema = common.extend({
 });
 
 export const videoSchema = common.extend({
+  dpr: z.number().int().min(1).max(2).default(1),
   recordingMode: z.enum(["static", "autoScroll"]).default("autoScroll"),
   durationSeconds: z.number().int().min(3).max(30).default(10),
   scrollSpeed: z.enum(["slow", "normal", "fast"]).default("normal"),
