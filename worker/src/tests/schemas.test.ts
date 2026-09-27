@@ -10,6 +10,10 @@ describe("capture schemas", () => {
   it("rejects selected-height capture without a height", () => {
     expect(() => screenshotSchema.parse({ url: "https://example.com", screenshotType: "selectedHeight" })).toThrow();
   });
+  it("defaults video render scale to DPR 1", () => {
+    const value = videoSchema.parse({ url: "https://example.com" });
+    expect(value.dpr).toBe(1);
+  });
   it("caps video duration", () => {
     expect(() => videoSchema.parse({ url: "https://example.com", durationSeconds: 31 })).toThrow();
   });
