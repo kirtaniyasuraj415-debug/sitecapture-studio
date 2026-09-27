@@ -1,5 +1,6 @@
 services:
   worker:
+    image: sitecapture-studio-worker:local
     build:
       context: ./worker
       dockerfile: Dockerfile
@@ -21,6 +22,7 @@ services:
     restart: unless-stopped
 
   web:
+    image: sitecapture-studio-web:local
     build:
       context: .
       dockerfile: Dockerfile
