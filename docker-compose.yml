@@ -8,7 +8,10 @@ services:
       HOST: 0.0.0.0
       ALLOWED_ORIGINS: http://localhost:3000
       CAPTURE_CONCURRENCY: 1
+      MAX_QUEUE_LENGTH: 20
       FILE_TTL_MS: 1800000
+      MAX_PAGE_TRANSFER_BYTES: 104857600
+      MAX_OUTPUT_FILE_BYTES: 262144000
       ENABLE_4K_VIDEO: "false"
       MAX_VIDEO_RENDER_PIXELS: 10000000
       MAX_SCREENSHOT_PIXELS: 100000000
@@ -23,7 +26,7 @@ services:
       dockerfile: Dockerfile
     environment:
       CAPTURE_WORKER_URL: http://worker:8787
-      NEXT_PUBLIC_CAPTURE_WORKER_URL: http://localhost:8787
+      CAPTURE_PUBLIC_WORKER_URL: http://localhost:8787
     depends_on:
       - worker
     ports:
