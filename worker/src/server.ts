@@ -15,17 +15,26 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").
 await app.register(cors, { origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) });
 await ensureTemp();
 
+app.addHook("onRequest", async (request, reply) => {
+  const apiKey = process.env.CAPTURE_API_KEY;
+  if (!apiKey) return;
+  if (!request.url.startsWith("/api/capture/") && !request.url.startsWith("/api/jobs/")) return;
+  if (request.headers["x-sitecapture-key"] !== apiKey) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Capture worker authorization failed." } });
+  }
+});
+
 function stage(jobId: string) {
   return (status: string, progress: number, message: string) => jobs.update(jobId, { status: status as never, progress, message });
 }
 
-app.get("/health", async () => ({ ok: true, service: "sitecapture-worker", concurrency: Math.max(1, Math.min(2, Number(process.env.CAPTURE_CONCURRENCY || 1))), fourKVideo: process.env.ENABLE_4K_VIDEO === "true" }));
+app.get("/health", async () => ({ ok: true, service: "sitecapture-worker", concurrency: Math.max(1, Math.min(2, Number(process.env.CAPTURE_CONCURRENCY || 1))), queue: queue.stats(), fourKVideo: process.env.ENABLE_4K_VIDEO === "true" }));
 
 app.post("/api/capture/screenshot", async (request, reply) => {
   const parsed = screenshotSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: { code: "INVALID_INPUT", message: parsed.error.issues[0]?.message || "Invalid capture settings." } });
   const job = jobs.create("screenshot");
-  queue.enqueue(async () => {
+  const accepted = queue.enqueue(async () => {
     try {
       const result = await captureScreenshot(parsed.data, stage(job.id));
       jobs.update(job.id, { status: "ready", progress: 100, message: "Ready", result: { ...result, downloadUrl: `/api/files/${result.fileId}?download=1`, previewUrl: `/api/files/${result.fileId}` } });
@@ -33,6 +42,7 @@ app.post("/api/capture/screenshot", async (request, reply) => {
       jobs.update(job.id, { status: "error", progress: 100, message: "Capture failed", error: toPublicError(error) });
     }
   });
+  if (!accepted) { jobs.remove(job.id); return reply.code(429).send({ error: { code: "QUEUE_FULL", message: "Capture queue is full. Try again in a moment." } }); }
   return reply.code(202).send({ id: job.id, status: job.status });
 });
 
@@ -40,7 +50,7 @@ app.post("/api/capture/video", async (request, reply) => {
   const parsed = videoSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: { code: "INVALID_INPUT", message: parsed.error.issues[0]?.message || "Invalid recording settings." } });
   const job = jobs.create("video");
-  queue.enqueue(async () => {
+  const accepted = queue.enqueue(async () => {
     try {
       const result = await captureVideo(parsed.data, stage(job.id));
       const secondary = result.secondaryFile ? { ...result.secondaryFile, downloadUrl: `/api/files/${result.secondaryFile.fileId}?download=1` } : undefined;
@@ -49,6 +59,7 @@ app.post("/api/capture/video", async (request, reply) => {
       jobs.update(job.id, { status: "error", progress: 100, message: "Recording failed", error: toPublicError(error) });
     }
   });
+  if (!accepted) { jobs.remove(job.id); return reply.code(429).send({ error: { code: "QUEUE_FULL", message: "Capture queue is full. Try again in a moment." } }); }
   return reply.code(202).send({ id: job.id, status: job.status });
 });
 
