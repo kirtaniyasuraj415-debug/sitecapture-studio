@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: sitecapture-studio-worker
+    runtime: docker
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: ./worker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: CAPTURE_CONCURRENCY
+        value: 1
+      - key: FILE_TTL_MS
+        value: 1800000
+      - key: ENABLE_4K_VIDEO
+        value: false
+      - key: MAX_VIDEO_RENDER_PIXELS
+        value: 8294400
+      - key: MAX_SCREENSHOT_PIXELS
+        value: 50000000
+      - key: ALLOWED_ORIGINS
+        sync: false
