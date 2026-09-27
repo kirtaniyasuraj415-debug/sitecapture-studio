@@ -9,8 +9,8 @@ export type DevicePreset = {
   userAgent?: string;
 };
 
-const mobileUA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
-const tabletUA = "Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const mobileUA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36";
+const tabletUA = "Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 
 export const DEVICE_PRESETS: DevicePreset[] = [
   { id: "desktop-1920", label: "Desktop 1920 × 1080", kind: "desktop", width: 1920, height: 1080, isMobile: false, hasTouch: false },
@@ -25,7 +25,11 @@ export const DEVICE_PRESETS: DevicePreset[] = [
 
 export function resolveDevice(input: { deviceId?: string; width?: number; height?: number; isMobile?: boolean; hasTouch?: boolean; userAgent?: string }) {
   const preset = input.deviceId ? DEVICE_PRESETS.find((d) => d.id === input.deviceId) : undefined;
-  if (preset) return { ...preset, isMobile: input.isMobile ?? preset.isMobile, hasTouch: input.hasTouch ?? preset.hasTouch, userAgent: input.userAgent || preset.userAgent };
+  if (preset) {
+    const isMobile = input.isMobile ?? preset.isMobile;
+    const userAgent = input.userAgent || preset.userAgent || (isMobile ? (preset.width > 600 ? tabletUA : mobileUA) : undefined);
+    return { ...preset, isMobile, hasTouch: input.hasTouch ?? preset.hasTouch, userAgent };
+  }
   const width = input.width ?? 1920;
   const height = input.height ?? 1080;
   return {
@@ -36,6 +40,6 @@ export function resolveDevice(input: { deviceId?: string; width?: number; height
     height,
     isMobile: Boolean(input.isMobile),
     hasTouch: Boolean(input.hasTouch),
-    userAgent: input.userAgent,
+    userAgent: input.userAgent || (input.isMobile ? (width > 600 ? tabletUA : mobileUA) : undefined),
   };
 }
