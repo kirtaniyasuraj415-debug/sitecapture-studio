@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isPrivateAddress, validatePublicUrl } from "../capture/security.js";
 
-describe("SSRF protection", () => {
+ describe("SSRF protection", () => {
   it("blocks private IPv4 ranges", () => {
     for (const ip of ["127.0.0.1", "10.0.0.2", "172.16.0.1", "192.168.1.1", "169.254.169.254", "198.51.100.10", "203.0.113.10"]) expect(isPrivateAddress(ip)).toBe(true);
     expect(isPrivateAddress("8.8.8.8")).toBe(false);
