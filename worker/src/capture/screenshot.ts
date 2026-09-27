@@ -37,8 +37,7 @@ export async function captureScreenshot(input: ScreenshotInput, onStage: (status
       } else if (input.screenshotType === "selectedHeight") {
         cssHeight = input.selectedHeight || device.height;
         await page.addStyleTag({ content: `html,body{min-height:${cssHeight}px!important}` });
-        screenshotOptions.clip = { x: 0, y: 0, width: device.width, height: cssHeight };
-        screenshotOptions.captureBeyondViewport = true;
+        await page.setViewportSize({ width: device.width, height: cssHeight });
       }
       const physicalPixels = device.width * cssHeight * input.dpr * input.dpr;
       const maxPixels = Number(process.env.MAX_SCREENSHOT_PIXELS || 100_000_000);
