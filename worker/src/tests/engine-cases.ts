@@ -92,7 +92,7 @@ async function main() {
     // 6. Responsive mobile website behavior.
     {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-      await page.setContent('<style>#mode{display:none}@media(max-width:600px){#mode{display:block;width:123px}}</style><div id="mode">mobile</div>');
+      await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><style>#mode{display:none}@media(max-width:600px){#mode{display:block;width:123px}}</style><div id="mode">mobile</div>');
       const state = await page.locator("#mode").evaluate((el) => ({ display: getComputedStyle(el).display, width: getComputedStyle(el).width }));
       assert(state.display === "block" && state.width === "123px", "Mobile responsive CSS did not activate");
       await page.close();
