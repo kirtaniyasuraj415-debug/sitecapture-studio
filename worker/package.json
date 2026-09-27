@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "tsc -p tsconfig.smoke.json && node dist-smoke/tests/integration-smoke.js"
+    "smoke": "tsc -p tsconfig.smoke.json && node dist-smoke/tests/engine-cases.js && node dist-smoke/tests/integration-smoke.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
