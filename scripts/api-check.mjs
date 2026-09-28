@@ -19,6 +19,7 @@ response=await fetch(base+created.result.previewUrl,{headers:{range:'bytes=99999
 response=await fetch(`${base}/api/capture/video`,{method:'POST',headers,body:JSON.stringify({url:'https://example.com',durationSeconds:999})});assert.equal(response.status,400);
 response=await fetch(`${base}/api/capture/screenshot`,{method:'POST',headers,body:'{invalid'});assert.equal(response.status,400);
 response=await fetch(`${base}/api/capture/screenshot`,{method:'POST',headers:{...headers,origin:'https://unrelated.example'},body:'{}'});assert.equal(response.status,403);
+response=await fetch(`${base}/api/capture/screenshot`,{method:'POST',headers:{...headers,origin:'null'},body:'{}'});assert.equal(response.status,403);
 response=await fetch(`${base}/api/capture/screenshot`,{method:'POST',headers,body:JSON.stringify({url:'https://example.com',junk:'x'.repeat(20000)})});assert.equal(response.status,413);
 await writeFile('artifacts/api-tests.json',JSON.stringify({status:'passed',dimensions:'3840x2160',checks:['Next.js → worker → Chromium → download','Byte-range 206 and invalid range 416','Zod duration validation','Malformed JSON','Cross-origin rejection','Request body limit']},null,2));
 console.log('API end-to-end checks passed.');

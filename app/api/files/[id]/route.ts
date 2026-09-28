@@ -7,7 +7,7 @@ export async function GET(request: Request, {params}: {params:Promise<{id:string
   try {
     const download = new URL(request.url).searchParams.get('download') === '1' ? '?download=1' : '';
     const headers = new Headers(); if (request.headers.has('range')) headers.set('range',request.headers.get('range')!);
-    const response = await proxyWorker(`/api/files/${id}${download}`,{headers});
+    const response = await proxyWorker(`/api/files/${id}${download}`,{headers},300_000);
     const outputHeaders = new Headers({'cache-control':'no-store','x-content-type-options':'nosniff'});
     for (const key of ['content-type','content-length','content-range','accept-ranges','content-disposition']) {const value=response.headers.get(key); if(value) outputHeaders.set(key,value);}
     return new Response(response.body,{status:response.status,headers:outputHeaders});

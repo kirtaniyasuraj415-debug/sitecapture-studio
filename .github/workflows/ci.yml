@@ -59,6 +59,14 @@ jobs:
         run: node scripts/api-check.mjs
       - name: Build single-container distribution
         run: docker build -f Dockerfile.single -t sitecapture-studio:single .
+      - name: Verify single-container startup and capture
+        run: |
+          docker run -d --name sitecapture-single --memory=4g --cpus=2 --shm-size=1g --pids-limit=256 --security-opt seccomp=worker/seccomp_profile.json -p 127.0.0.1:3101:3000 sitecapture-studio:single
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:3101/health >/dev/null; then break; fi
+            sleep 2
+          done
+          TEST_APP_URL=http://127.0.0.1:3101 node scripts/api-check.mjs
       - name: Show logs
         if: always()
         run: docker compose logs
@@ -70,4 +78,7 @@ jobs:
           retention-days: 14
       - name: Cleanup
         if: always()
-        run: docker compose down -v
+        run: |
+          docker logs sitecapture-single || true
+          docker rm -f sitecapture-single || true
+          docker compose down -v

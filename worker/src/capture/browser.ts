@@ -138,14 +138,6 @@ export async function preparePage(page: Page, url: string, input: ScreenshotInpu
   await page.evaluate(async () => { await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 5000))]); });
   await enforcePageBudget(page, observedNetworkBytes);
   assertEgressBudget();
-  const readiness = await page.evaluate(() => ({
-    failedImages: Array.from(document.images).filter((img) => !img.complete || !img.naturalWidth).length,
-    missingFonts: Array.from(document.fonts).filter((font) => font.status !== 'loaded').length,
-    height: document.documentElement.scrollHeight,
-  }));
-  if (readiness.failedImages) warnings.push(`${readiness.failedImages} image(s) could not finish loading.`);
-  if (readiness.missingFonts) warnings.push(`${readiness.missingFonts} font face(s) are not loaded; the site may use a fallback.`);
-  if (readiness.height > 30000) warnings.push('Lazy loading was limited to the first 30,000 CSS pixels.');
 
   if (input.hideScrollbars) await page.addStyleTag({ content: "html,body,*{scrollbar-width:none!important}::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}" });
   if (!input.keepAnimations) await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
@@ -157,6 +149,18 @@ export async function preparePage(page: Page, url: string, input: ScreenshotInpu
     onStage("rendering", 65, `Waiting ${input.waitSeconds}s for final render`);
     await page.waitForTimeout(input.waitSeconds * 1000);
   }
+  // Unused @font-face declarations stay unloaded by design; only failed/pending faces need a warning.
+  const readiness = await page.evaluate(() => ({
+    failedImages: Array.from(document.images).filter((img) => !img.complete || !img.naturalWidth).length,
+    missingFonts: Array.from(document.fonts).filter((font) => font.status === 'loading' || font.status === 'error').length,
+    height: document.documentElement.scrollHeight,
+  }));
+  if (readiness.failedImages) warnings.push(`${readiness.failedImages} image(s) could not finish loading.`);
+  if (readiness.missingFonts) warnings.push(`${readiness.missingFonts} font face(s) are not loaded; the site may use a fallback.`);
+  if (readiness.height > 30000) warnings.push('Lazy loading was limited to the first 30,000 CSS pixels.');
+
+  await enforcePageBudget(page, observedNetworkBytes);
+  assertEgressBudget();
   await validatePublicUrl(page.url());
   await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:"instant"}));
   return warnings;

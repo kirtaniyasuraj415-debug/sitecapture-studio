@@ -23,7 +23,7 @@ const pages:Record<string,string>={
   '/mobile':html('<main id="responsive" style="height:100vh"></main>','#responsive{background:#a02020}@media(max-width:600px){#responsive{background:#20a040}}'),
   '/vh':html('<div style="height:100vh;background:#20a040"></div><div style="height:2500px;background:#a02020"></div>'),
   '/animation':html('<div id="moving"></div>','@keyframes travel{from{transform:translateX(0)}to{transform:translateX(250px)}}#moving{width:100px;height:100px;background:#20a040;animation:travel 2s linear infinite}'),
-  '/fonts':html('<h1 style="font-family:CaptureFont">Waiting for web fonts</h1>',"@font-face{font-family:CaptureFont;src:url('/font.woff2')}"),
+  '/fonts':html('<h1 style="font-family:CaptureFont">Waiting for web fonts</h1>',"@font-face{font-family:CaptureFont;src:url('/font.woff2')}@font-face{font-family:UnusedFont;src:url('/never-needed.woff2')}"),
 };
 const pixel=async(file:string,x:number,y:number)=>{const {data}=await sharp(file).extract({left:x,top:y,width:1,height:1}).removeAlpha().raw().toBuffer({resolveWithObject:true});return Array.from(data);};
 

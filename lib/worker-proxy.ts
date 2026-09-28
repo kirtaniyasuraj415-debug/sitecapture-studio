@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 const privateWorkerBase = () => process.env.CAPTURE_WORKER_URL || 'http://127.0.0.1:8787';
-export async function proxyWorker(path: string, init?: RequestInit) {
+export async function proxyWorker(path: string, init?: RequestInit, timeoutMs = 20_000) {
   const headers = new Headers(init?.headers);
   if (process.env.CAPTURE_WORKER_API_KEY) headers.set('x-sitecapture-key', process.env.CAPTURE_WORKER_API_KEY);
-  return fetch(`${privateWorkerBase()}${path}`, {...init, headers, cache:'no-store', redirect:'error', signal:AbortSignal.timeout(20_000)});
+  return fetch(`${privateWorkerBase()}${path}`, {...init, headers, cache:'no-store', redirect:'error', signal:AbortSignal.timeout(timeoutMs)});
 }
 export async function captureProxy(request: Request, kind: 'screenshot' | 'video') {
   const origin = request.headers.get('origin');
-  if (origin && new URL(origin).host !== request.headers.get('host')) return NextResponse.json({error:{message:'Cross-origin capture requests are not allowed.'}}, {status:403});
+  if (origin) {
+    try {
+      if (new URL(origin).host !== request.headers.get('host')) throw new Error('Untrusted origin');
+    } catch {
+      return NextResponse.json({error:{message:'Cross-origin capture requests are not allowed.'}}, {status:403});
+    }
+  }
   try {
     // Stream with an enforced limit, including chunked requests without Content-Length.
     const reader = request.body?.getReader();
