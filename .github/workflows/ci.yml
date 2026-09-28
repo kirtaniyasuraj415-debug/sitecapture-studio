@@ -61,12 +61,12 @@ jobs:
         run: docker build -f Dockerfile.single -t sitecapture-studio:single .
       - name: Verify single-container startup and capture
         run: |
-          docker run -d --name sitecapture-single --memory=4g --cpus=2 --shm-size=1g --pids-limit=256 --security-opt seccomp=worker/seccomp_profile.json -p 127.0.0.1:3101:3000 sitecapture-studio:single
+          docker run -d --name sitecapture-single --memory=4g --cpus=2 --shm-size=1g --pids-limit=256 --security-opt seccomp=worker/seccomp_profile.json -e SITE_PASSWORD=ci-only-test-password -p 127.0.0.1:3101:3000 sitecapture-studio:single
           for attempt in {1..60}; do
             if curl -fsS http://127.0.0.1:3101/health >/dev/null; then break; fi
             sleep 2
           done
-          TEST_APP_URL=http://127.0.0.1:3101 node scripts/api-check.mjs
+          TEST_SITE_PASSWORD=ci-only-test-password TEST_APP_URL=http://127.0.0.1:3101 node scripts/api-check.mjs
       - name: Show logs
         if: always()
         run: docker compose logs

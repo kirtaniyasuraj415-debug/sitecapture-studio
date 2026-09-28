@@ -124,17 +124,18 @@ bash scripts/test-local.sh
 - `smoke:fixtures` calls the real capture functions against deterministic page fixtures. It verifies native DPR dimensions, decoded image pixels, lazy images, a delayed real Roboto font, full page, viewport-preserving selected height, mobile CSS, JPEG/WebP, redirects, timeout recovery, animations, resource rejection, MP4/WebM duration, and cleanup.
 - `smoke:live` captures `example.com`, `nextjs.org`, Google Fonts and a real 1080p video. It requires unrestricted outbound public DNS/HTTP(S).
 - UI checks exercise desktop/phone layouts, controls and real worker errors.
-- CI builds the production Docker images and captures a real URL through the Next.js API, then checks downloads, seeking, validation and size limits. It uploads media and machine-readable test reports as workflow artifacts.
+- CI starts both Docker distributions and captures a real URL through the Next.js API as a screenshot and 1080p MP4/WebM video, then checks downloads, seeking, the optional password gate, validation and size limits. It uploads media and machine-readable test reports as workflow artifacts.
 
 ## Free hosting: checked 28 September 2026
 
 **Do not confuse free UI hosting with a working capture service.** A static frontend without the running worker cannot capture anything.
 
 - Render provides a genuine free Docker web-service plan, but only **512 MB RAM and 0.1 CPU**, with idle sleep/cold starts. The included `render.yaml` explicitly selects that free plan and limits work. This is a constrained experiment, not a reliable host for arbitrary 1080p–4K video. Resource-heavy captures return errors instead of silently reducing quality.
+- Oracle Cloud's current Always Free A1 allowance is **2 OCPUs / 12 GB RAM** (1,500 OCPU hours and 9,000 GB hours monthly). It is a stronger candidate for hosting Docker yourself, but requires your own account with card-based identity verification, available home-region capacity, and staying inside the Always Free limits. Idle instances may be reclaimed. Its ARM64 deployment has not been verified by this repository's x86-64 CI; verify the images and captures on that host before relying on it. It is not an already-provisioned deployment.
 - Hugging Face's current documentation requires a paid plan to create Docker Spaces, despite the CPU Basic hardware rate being listed as free. It is not an unconditional free Docker deployment option.
 - Vercel is suitable for the web interface/API proxy with a separately hosted worker. This project does not attempt a Chromium+FFmpeg Vercel Function deployment.
 - The full-featured, zero-hosting-fee reference option is local Docker on an existing computer/server. There is no paid screenshot service hidden in the app.
 
-Sources: [Render free services](https://render.com/docs/free), [Render pricing](https://render.com/pricing), [Hugging Face Spaces](https://huggingface.co/docs/hub/spaces-overview), [Playwright Docker security](https://playwright.dev/docs/docker).
+Sources: [Render free services](https://render.com/docs/free), [Render pricing](https://render.com/pricing), [Oracle Always Free limits](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm), [Oracle account requirements](https://www.oracle.com/cloud/free/faq/), [Hugging Face Spaces](https://huggingface.co/docs/hub/spaces-overview), [Playwright Docker security](https://playwright.dev/docs/docker).
 
 For a Render account you control, import this repository as a Blueprint and review `plan: free`. A compatible container runtime with sandbox support is required. If the host blocks sandboxing, do not silently turn it off for untrusted public websites; use a suitably isolated host. No paid upgrade is selected automatically.
