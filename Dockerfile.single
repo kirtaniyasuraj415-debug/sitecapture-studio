@@ -1,0 +1,24 @@
+FROM mcr.microsoft.com/playwright:v1.63.0-noble AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY worker/package.json worker/package-lock.json ./worker/
+RUN cd worker && npm ci --no-audit --no-fund
+COPY . .
+RUN npm run build && npm run worker:build && cd worker && npm prune --omit=dev
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tini && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder --chown=pwuser:pwuser /app/.next/standalone ./
+COPY --from=builder --chown=pwuser:pwuser /app/.next/static ./.next/static
+COPY --from=builder --chown=pwuser:pwuser /app/public ./public
+COPY --from=builder --chown=pwuser:pwuser /app/worker/package.json ./worker/package.json
+COPY --from=builder --chown=pwuser:pwuser /app/worker/dist ./worker/dist
+COPY --from=builder --chown=pwuser:pwuser /app/worker/node_modules ./worker/node_modules
+COPY --chown=pwuser:pwuser scripts/start-container.mjs ./scripts/start-container.mjs
+RUN mkdir -p temp && chown pwuser:pwuser temp
+ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright CHROMIUM_NO_SANDBOX=false
+USER pwuser
+EXPOSE 3000
+ENTRYPOINT ["tini", "--"]
+CMD ["node", "scripts/start-container.mjs"]

@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { DEVICE_PRESETS } from "../capture/devices.js";
 
 const common = z.object({
-  url: z.string().url().max(2048),
-  deviceId: z.string().max(64).optional(),
+  url: z.string().url().max(2048).refine((v) => /^https?:\/\//i.test(v), "Only http:// and https:// URLs are allowed."),
+  deviceId: z.enum(DEVICE_PRESETS.map((d) => d.id) as [string, ...string[]]).optional(),
   width: z.number().int().min(320).max(3840).optional(),
-  height: z.number().int().min(480).max(6000).optional(),
+  height: z.number().int().min(240).max(6000).optional(),
   isMobile: z.boolean().optional(),
   hasTouch: z.boolean().optional(),
   userAgent: z.string().max(512).optional(),
@@ -27,7 +28,7 @@ export const screenshotSchema = common.extend({
 });
 
 export const videoSchema = common.extend({
-  dpr: z.number().int().min(1).max(2).default(1),
+  dpr: z.literal(1).default(1),
   recordingMode: z.enum(["static", "autoScroll"]).default("autoScroll"),
   durationSeconds: z.number().int().min(3).max(30).default(10),
   scrollSpeed: z.enum(["slow", "normal", "fast"]).default("normal"),

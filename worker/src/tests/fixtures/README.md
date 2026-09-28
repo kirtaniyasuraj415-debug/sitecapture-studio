@@ -1,0 +1,1 @@
+`roboto.woff2` is the Google Fonts Roboto regular font used to test delayed font readiness, downloaded from https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2 . Roboto is distributed under the Apache License 2.0; see APACHE-2.0.txt. The font is a test fixture, not an app UI dependency.

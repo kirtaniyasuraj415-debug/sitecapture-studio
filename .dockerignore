@@ -5,3 +5,9 @@ worker/node_modules
 worker/dist
 worker/temp
 *.log
+
+**/node_modules
+**/dist
+**/dist-smoke
+artifacts
+*.tsbuildinfo

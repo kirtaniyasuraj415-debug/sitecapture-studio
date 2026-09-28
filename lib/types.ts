@@ -34,6 +34,10 @@ export type CaptureJob = {
     finalUrl: string;
     deviceLabel: string;
     dpr: number;
+    warnings?: string[];
+    durationSeconds?: number;
+    frameRate?: string;
+    expiresAt?: string;
     secondaryFile?: { fileId: string; fileName: string; downloadUrl: string; format: string };
   };
   error?: { code: string; message: string };

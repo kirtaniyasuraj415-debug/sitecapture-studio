@@ -1,162 +1,147 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, Clipboard, Download, Film, Gauge, RefreshCcw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
-import { DEVICE_PRESETS, deviceById } from "@/lib/devices";
-import { createJob, getJob } from "@/lib/api";
-import type { CaptureJob, CaptureMode, ScreenshotType } from "@/lib/types";
-import { DevicePreview } from "./DevicePreview";
-import { Progress } from "./Progress";
-import { Toggle } from "./Toggle";
+import Image from 'next/image';
+import Link from 'next/link';
+import { useEffect, useRef, useState } from 'react';
+import { Camera, Video, Monitor, Tablet, Smartphone, SlidersHorizontal, ChevronDown, ArrowUpRight, Download, RotateCcw, Link2, Check, LoaderCircle, AlertCircle } from 'lucide-react';
+import { DEVICE_PRESETS, deviceById } from '@/lib/devices';
+import { createJob, getJob } from '@/lib/api';
+import type { CaptureJob, CaptureMode, DeviceKind, ScreenshotType } from '@/lib/types';
+import { DevicePreview } from './DevicePreview';
+import { Progress } from './Progress';
 
-const delays = [0, 1, 2, 3, 5, 10];
-const durations = [5, 10, 15, 30];
-
-function bytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
+const delays = [0,1,2,3,5,10];
+const formatBytes = (v:number) => v < 1024 * 1024 ? `${(v/1024).toFixed(1)} KB` : `${(v/1024/1024).toFixed(1)} MB`;
+const kinds = [{id:'desktop',name:'Desktop',Icon:Monitor},{id:'tablet',name:'Tablet',Icon:Tablet},{id:'mobile',name:'Mobile',Icon:Smartphone},{id:'custom',name:'Custom',Icon:SlidersHorizontal}] as const;
 
 export default function CaptureStudio() {
-  const [mode, setMode] = useState<CaptureMode>("screenshot");
-  const [url, setUrl] = useState("https://example.com");
-  const [deviceId, setDeviceId] = useState("desktop-1920");
-  const [custom, setCustom] = useState(false);
-  const [width, setWidth] = useState(1920);
-  const [height, setHeight] = useState(1080);
-  const [dpr, setDpr] = useState(2);
-  const [waitSeconds, setWaitSeconds] = useState(2);
-  const [screenshotType, setScreenshotType] = useState<ScreenshotType>("viewport");
-  const [selectedHeight, setSelectedHeight] = useState(3000);
-  const [format, setFormat] = useState<"png" | "jpeg" | "webp">("png");
-  const [quality, setQuality] = useState(92);
-  const [recordingMode, setRecordingMode] = useState<"static" | "autoScroll">("autoScroll");
-  const [durationSeconds, setDurationSeconds] = useState(10);
-  const [scrollSpeed, setScrollSpeed] = useState<"slow" | "normal" | "fast">("normal");
-  const [output, setOutput] = useState<"mp4" | "webm" | "both">("mp4");
-  const [videoPreset, setVideoPreset] = useState<"device" | "1080p" | "1440p" | "4k">("device");
-  const [advanced, setAdvanced] = useState(false);
-  const [colorScheme, setColorScheme] = useState<"dark" | "light" | "no-preference">("no-preference");
-  const [hideScrollbars, setHideScrollbars] = useState(false);
-  const [keepAnimations, setKeepAnimations] = useState(true);
-  const [removeCookiePopup, setRemoveCookiePopup] = useState(false);
-  const [transparentBackground, setTransparentBackground] = useState(false);
-  const [userAgent, setUserAgent] = useState("");
-  const [forceTouch, setForceTouch] = useState(false);
-  const [job, setJob] = useState<CaptureJob | null>(null);
-  const [error, setError] = useState("");
-
+  const [mode,setMode] = useState<CaptureMode>('screenshot');
+  const [url,setUrl] = useState('');
+  const [kind,setKind] = useState<DeviceKind>('desktop');
+  const [deviceId,setDeviceId] = useState('desktop-1920');
+  const [width,setWidth] = useState(1920), [height,setHeight] = useState(1080);
+  const [dpr,setDpr] = useState(2), [waitSeconds,setWaitSeconds] = useState(2);
+  const [screenshotType,setScreenshotType] = useState<ScreenshotType>('viewport');
+  const [selectedHeight,setSelectedHeight] = useState(3000);
+  const [format,setFormat] = useState<'png'|'jpeg'|'webp'>('png'), [quality,setQuality] = useState(92);
+  const [recordingMode,setRecordingMode] = useState<'autoScroll'|'static'>('autoScroll');
+  const [durationSeconds,setDuration] = useState(10);
+  const [scrollSpeed,setScrollSpeed] = useState<'slow'|'normal'|'fast'>('normal');
+  const [output,setOutput] = useState<'mp4'|'webm'|'both'>('mp4');
+  const [videoPreset,setVideoPreset] = useState<'device'|'1080p'|'1440p'|'4k'>('device');
+  const [advanced,setAdvanced] = useState(false);
+  const [colorScheme,setColorScheme] = useState<'dark'|'light'|'no-preference'>('no-preference');
+  const [hideScrollbars,setHideScrollbars] = useState(true), [keepAnimations,setKeepAnimations] = useState(true);
+  const [removeCookiePopup,setRemoveCookiePopup] = useState(false), [transparent,setTransparent] = useState(false);
+  const [touch,setTouch] = useState(false), [userAgent,setUserAgent] = useState('');
+  const [job,setJob] = useState<CaptureJob|null>(null), [error,setError] = useState('');
+  const [submitting,setSubmitting] = useState(false), [polling,setPolling] = useState(false);
+  const [capabilities,setCapabilities] = useState<{fourKVideo:boolean}|null>(null);
+  const [connection,setConnection] = useState<'checking'|'online'|'offline'>('checking');
+  const [copied,setCopied] = useState(false);
+  const resultRef = useRef<HTMLElement>(null);
+  const submitLock = useRef(false);
   const preset = deviceById(deviceId);
-  const device = useMemo(() => custom ? { ...preset, id: "custom", label: `Custom ${width} × ${height}`, width, height, kind: width <= 600 ? "mobile" as const : width <= 1100 ? "tablet" as const : "desktop" as const, isMobile: width <= 1100, hasTouch: width <= 1100 } : preset, [custom, width, height, preset]);
-  const busy = job && !["ready", "error"].includes(job.status);
+  const device = kind === 'custom' ? {width,height,isMobile:touch,hasTouch:touch,label:`Custom ${width} × ${height}`} : preset;
+  const viewport = mode === 'video' && (kind === 'desktop' || kind === 'custom' && !touch) && videoPreset !== 'device'
+    ? videoPreset === '4k' ? {width:3840,height:2160} : videoPreset === '1440p' ? {width:2560,height:1440} : {width:1920,height:1080}
+    : device;
+  const busy = submitting || polling;
+  const jobId = job?.id;
+
+  async function checkWorker() {
+    setConnection('checking');
+    try { const r=await fetch('/api/capabilities',{signal:AbortSignal.timeout(22_000),cache:'no-store'}); if (!r.ok) throw new Error(); setCapabilities(await r.json()); setConnection('online'); }
+    catch { setConnection('offline'); }
+  }
+  useEffect(() => { void fetch('/api/capabilities',{signal:AbortSignal.timeout(22_000),cache:'no-store'}).then(async r=> {if(!r.ok) throw new Error(); setCapabilities(await r.json()); setConnection('online');}).catch(()=>setConnection('offline')); },[]);
 
   useEffect(() => {
-    if (!job || job.status === "ready" || job.status === "error") return;
-    const timer = window.setInterval(async () => {
-      try { const next = await getJob(job.id); setJob(next); } catch (e) { setError(e instanceof Error ? e.message : "Could not read capture progress."); }
-    }, 900);
-    return () => window.clearInterval(timer);
-  }, [job]);
+    if (!jobId || !polling) return;
+    let stopped=false, failures=0;
+    let timer:ReturnType<typeof setTimeout>;
+    const started=Date.now();
+    const poll=async()=> {
+      try {
+        const next=await getJob(jobId); if(stopped) return;
+        failures=0; setJob(next); setError('');
+        if(['ready','error'].includes(next.status)) {setPolling(false); if(next.status==='ready') setTimeout(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),80); return;}
+      } catch(e) { if(stopped) return; failures++; if(failures>=3) {setError(e instanceof Error?e.message:'Connection lost.'); setPolling(false); return;} }
+      if(Date.now()-started>12*60*1000) {setError('This job is taking too long. Check its status again, or retry.');setPolling(false);return;}
+      timer=setTimeout(poll,failures?2500:1000);
+    };
+    timer=setTimeout(poll,500);
+    return ()=>{stopped=true;clearTimeout(timer);};
+  },[jobId,polling]);
 
-  function chooseDevice(id: string) {
-    setCustom(false); setDeviceId(id);
-    const next = deviceById(id); setWidth(next.width); setHeight(next.height);
-    if (next.kind !== "desktop") setVideoPreset("device");
+  function chooseKind(next:DeviceKind) {
+    setKind(next); if(next!=='custom') {const p=DEVICE_PRESETS.find(d=>d.kind===next)!;setDeviceId(p.id);setWidth(p.width);setHeight(p.height);}
+    setVideoPreset('device');
   }
-
-  async function startCapture() {
-    setError(""); setJob(null);
+  async function startCapture(e?:React.FormEvent) {
+    e?.preventDefault(); if(submitLock.current || busy) return;
+    submitLock.current=true; setSubmitting(true); setError(''); setJob(null);
     try {
-      const normalized = new URL(url.trim());
-      if (!["http:", "https:"].includes(normalized.protocol)) throw new Error("Sirf http:// ya https:// URL allowed hai.");
-      const common = {
-        url: normalized.toString(),
-        ...(custom ? { width, height, isMobile: forceTouch || device.isMobile, hasTouch: forceTouch || device.hasTouch } : { deviceId, ...(forceTouch ? { isMobile: true, hasTouch: true } : {}) }),
-        waitSeconds, colorScheme, hideScrollbars, keepAnimations, removeCookiePopup, transparentBackground,
-        ...(userAgent.trim() ? { userAgent: userAgent.trim() } : {}),
-      };
-      const payload = mode === "screenshot"
-        ? { ...common, dpr, screenshotType, ...(screenshotType === "selectedHeight" ? { selectedHeight } : {}), format, quality }
-        : { ...common, dpr: 1, recordingMode, durationSeconds, scrollSpeed, output, videoPreset };
-      const created = await createJob(mode, payload);
-      setJob({ id: created.id, type: mode, status: "queued", progress: 3, message: "Queued", createdAt: new Date().toISOString() });
-    } catch (e) { setError(e instanceof Error ? e.message : "Invalid capture settings."); }
+      const normalized=new URL(url.trim());
+      if(!['http:','https:'].includes(normalized.protocol)) throw new Error('Enter a public http:// or https:// website URL.');
+      const common={url:normalized.toString(), ...(kind==='custom'?{width,height,isMobile:touch,hasTouch:touch}:{deviceId,...(touch?{isMobile:true,hasTouch:true}:{})}),waitSeconds,colorScheme,hideScrollbars,keepAnimations,removeCookiePopup,...(userAgent.trim()?{userAgent:userAgent.trim()}:{})};
+      const payload=mode==='screenshot'?{...common,dpr,screenshotType,selectedHeight,format,quality,transparentBackground:transparent}:{...common,dpr:1,recordingMode,durationSeconds,scrollSpeed,output,videoPreset};
+      const created=await createJob(mode,payload);
+      setJob({id:created.id,type:mode,status:'queued',progress:3,message:'Queued',createdAt:new Date().toISOString()});setPolling(true);
+    } catch(e) {setError(e instanceof TypeError?'Enter a valid URL, including https://.':e instanceof Error?e.message:'Could not start capture.');}
+    finally {submitLock.current=false;setSubmitting(false);}
   }
-
-  function captureAgain() { setJob(null); setError(""); }
-
-  return (
-    <main className="mx-auto min-h-screen max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
-      <header className="mb-6 flex flex-col gap-4 border-b border-white/8 pb-5 sm:flex-row sm:items-center sm:justify-between">
-        <div><div className="flex items-center gap-2"><div className="grid h-9 w-9 place-items-center rounded-xl bg-white text-black"><Camera size={18}/></div><h1 className="text-xl font-semibold tracking-tight">SiteCapture Studio</h1></div><p className="mt-2 text-sm text-zinc-500">Real Chromium rendering. Crisp pixels. No fake upscaling.</p></div>
-        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-zinc-400"><ShieldCheck size={14}/><span>Public URLs only · SSRF protected</span></div>
-      </header>
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,620px)_minmax(0,1fr)]">
-        <section className="rounded-3xl border border-white/10 bg-[#101010]/95 p-4 sm:p-6">
-          <div className="mb-5 grid grid-cols-2 rounded-xl bg-black p-1">
-            <button onClick={() => { setMode("screenshot"); setJob(null); }} className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm transition ${mode === "screenshot" ? "bg-white text-black" : "text-zinc-500 hover:text-white"}`}><Camera size={16}/>Screenshot</button>
-            <button onClick={() => { setMode("video"); setJob(null); }} className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm transition ${mode === "video" ? "bg-white text-black" : "text-zinc-500 hover:text-white"}`}><Film size={16}/>Record Website</button>
+  const result=job?.status==='ready'?job.result:null;
+  const requestedHeight=mode==='screenshot'&&screenshotType==='selectedHeight'?selectedHeight:viewport.height;
+  return <main className="studio-shell">
+    <header className="studio-header"><Link href="/" className="brand"><span className="brand-mark"><Camera size={21}/></span><span>SiteCapture<span className="brand-suffix"> Studio</span></span></Link><div className="connection" role="status"><span className={`connection-dot ${connection}`}/>{connection==='online'?'Worker connected':connection==='checking'?'Connecting…':'Worker offline'}</div></header>
+    <div className="workspace-heading"><div><p className="eyebrow">YOUR CAPTURE WORKSPACE</p><h1>A website. Every detail.</h1><p>Native-resolution screenshots and website recordings.</p></div><span className="workspace-note">PNG · JPEG · WebP · MP4 · WebM</span></div>
+    {connection==='offline' && <div className="notice" role="status"><AlertCircle size={18}/><p>The capture worker is unavailable or waking up.</p><button onClick={checkWorker}>Check again</button></div>}
+    <div className="workspace-grid">
+      <form className="settings-panel" onSubmit={startCapture}>
+        <fieldset disabled={busy} className="settings-fields">
+          <div className="mode-tabs" aria-label="Capture mode">{(['screenshot','video'] as CaptureMode[]).map(m=><button key={m} type="button" aria-pressed={mode===m} className={mode===m?'active':''} onClick={()=>{setMode(m);setJob(null);setError('');}}>{m==='screenshot'?<Camera size={17}/>:<Video size={17}/>}<span>{m==='screenshot'?'Screenshot':'Record website'}</span></button>)}</div>
+          <Field label="Website URL"><div className="url-field"><Link2 size={18}/><input aria-label="Website URL" type="url" required value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://example.com" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}/></div></Field>
+          <div className="settings-section"><div className="section-label"><span>Device</span><span className="meta">CSS viewport</span></div><div className="device-tabs">{kinds.map(({id,name,Icon})=><button key={id} type="button" className={kind===id?'active':''} aria-pressed={kind===id} onClick={()=>chooseKind(id)}><Icon size={20}/><span>{name}</span></button>)}</div>
+            {kind==='custom'?<div className="two-columns"><NumberField label="Width" value={width} min={320} max={3840} onChange={setWidth}/><NumberField label="Height" value={height} min={240} max={6000} onChange={setHeight}/></div>:<select aria-label="Device resolution" value={deviceId} onChange={e=>setDeviceId(e.target.value)} className="field size-select">{DEVICE_PRESETS.filter(d=>d.kind===kind).map(d=><option key={d.id} value={d.id}>{d.width} × {d.height}</option>)}</select>}
           </div>
-
-          <label className="mb-2 block text-xs font-medium uppercase tracking-[.14em] text-zinc-500">Website URL</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} inputMode="url" autoCapitalize="none" className="w-full rounded-xl border border-white/10 bg-black px-4 py-3.5 text-sm outline-none transition placeholder:text-zinc-700 focus:border-white/30" placeholder="https://example.com" />
-
-          <div className="mt-6 flex items-center justify-between"><span className="text-xs font-medium uppercase tracking-[.14em] text-zinc-500">Device preset</span><button onClick={() => setCustom((v) => !v)} className={`text-xs ${custom ? "text-white" : "text-zinc-500 hover:text-white"}`}>Custom size</button></div>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {DEVICE_PRESETS.map((item) => <button key={item.id} onClick={() => chooseDevice(item.id)} className={`rounded-xl border px-3 py-3 text-left transition ${!custom && deviceId === item.id ? "border-white/35 bg-white/10" : "border-white/8 bg-white/[0.025] hover:bg-white/[0.05]"}`}><span className="block text-xs text-zinc-300">{item.kind[0].toUpperCase()+item.kind.slice(1)}</span><span className="mt-1 block font-mono text-[11px] text-zinc-600">{item.width} × {item.height}</span></button>)}
-          </div>
-          {custom && <div className="mt-3 grid grid-cols-2 gap-3"><NumberField label="Width" value={width} min={320} max={3840} onChange={setWidth}/><NumberField label="Height" value={height} min={480} max={6000} onChange={setHeight}/></div>}
-
-          <div className={`mt-6 grid gap-4 ${mode === "screenshot" ? "sm:grid-cols-2" : "grid-cols-1"}`}>
-            {mode === "screenshot" && <Field label="Device Pixel Ratio"><select value={dpr} onChange={(e) => setDpr(Number(e.target.value))} className="field"><option value={1}>1×</option><option value={2}>2× — Recommended</option><option value={3}>3×</option></select></Field>}
-            <Field label="Extra wait"><select value={waitSeconds} onChange={(e) => setWaitSeconds(Number(e.target.value))} className="field">{delays.map((v) => <option key={v} value={v}>{v} sec{v === 2 ? " — Default" : ""}</option>)}</select></Field>
-          </div>
-
-          {mode === "screenshot" ? <>
-            <div className="mt-6"><span className="text-xs font-medium uppercase tracking-[.14em] text-zinc-500">Capture type</span><div className="mt-3 grid grid-cols-3 gap-2">{(["viewport","fullPage","selectedHeight"] as ScreenshotType[]).map((v) => <button key={v} onClick={() => setScreenshotType(v)} className={`rounded-xl border p-3 text-xs ${screenshotType === v ? "border-white/30 bg-white/10 text-white" : "border-white/8 text-zinc-500"}`}>{v === "fullPage" ? "Full page" : v === "selectedHeight" ? "Selected height" : "Viewport"}</button>)}</div></div>
-            {screenshotType === "selectedHeight" && <div className="mt-3"><NumberField label="Capture height" value={selectedHeight} min={480} max={12000} onChange={setSelectedHeight}/></div>}
-            <div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Image format"><select value={format} onChange={(e) => setFormat(e.target.value as typeof format)} className="field"><option value="png">PNG — Sharpest</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select></Field>{format !== "png" && <NumberField label={`Quality · ${quality}`} value={quality} min={60} max={100} onChange={setQuality} type="range"/>}</div>
-          </> : <>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2"><Field label="Recording mode"><select value={recordingMode} onChange={(e) => setRecordingMode(e.target.value as typeof recordingMode)} className="field"><option value="autoScroll">Auto scroll</option><option value="static">Static recording</option></select></Field><Field label="Duration · 3–30 sec"><div className="space-y-2"><div className="grid grid-cols-4 gap-1">{durations.map((v) => <button type="button" key={v} onClick={() => setDurationSeconds(v)} className={`rounded-lg border px-2 py-2 text-xs ${durationSeconds === v ? "border-white/30 bg-white/10 text-white" : "border-white/8 text-zinc-500"}`}>{v}s</button>)}</div><input type="number" value={durationSeconds} min={3} max={30} onChange={(e) => setDurationSeconds(Math.max(3, Math.min(30, Number(e.target.value) || 3)))} className="field" aria-label="Custom duration in seconds"/></div></Field></div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">{recordingMode === "autoScroll" && <Field label="Scroll speed"><select value={scrollSpeed} onChange={(e) => setScrollSpeed(e.target.value as typeof scrollSpeed)} className="field"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></Field>}<Field label="Output"><select value={output} onChange={(e) => setOutput(e.target.value as typeof output)} className="field"><option value="mp4">MP4 H.264</option><option value="webm">WebM</option><option value="both">MP4 + WebM</option></select></Field></div>
-            <div className="mt-4"><Field label="Desktop video preset"><select disabled={device.kind !== "desktop"} value={videoPreset} onChange={(e) => setVideoPreset(e.target.value as typeof videoPreset)} className="field disabled:opacity-40"><option value="device">Use selected device</option><option value="1080p">1080p · 1920 × 1080</option><option value="1440p">1440p · 2560 × 1440</option><option value="4k">4K · host permitting</option></select></Field>{device.kind !== "desktop" && <p className="mt-2 text-xs text-zinc-600">Mobile/tablet recording keeps the selected responsive viewport instead of forcing a desktop video size.</p>}</div>
+          {mode==='screenshot'?<>
+            <div className="two-columns settings-section"><Field label="Pixel density"><select className="field" value={dpr} onChange={e=>setDpr(Number(e.target.value))}>{[1,2,3].map(v=><option key={v} value={v}>{v}×{v===2?' · Default':''}</option>)}</select></Field><Field label="Image format"><select className="field" value={format} onChange={e=>setFormat(e.target.value as typeof format)}><option value="png">PNG · Lossless</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select></Field></div>
+            <div className="settings-section"><span className="section-label">Capture area</span><div className="segmented">{(['viewport','fullPage','selectedHeight'] as ScreenshotType[]).map(t=><button key={t} type="button" className={t===screenshotType?'active':''} aria-pressed={t===screenshotType} onClick={()=>setScreenshotType(t)}>{t==='viewport'?'Viewport':t==='fullPage'?'Full page':'Set height'}</button>)}</div></div>
+            {screenshotType==='selectedHeight'&&<NumberField label="Capture height (CSS px)" value={selectedHeight} min={480} max={12000} onChange={setSelectedHeight}/>}
+            {format!=='png'&&<Field label={`Quality · ${quality}${format==='webp'&&quality===100?' · Lossless':''}`}><input className="quality-range" type="range" min={60} max={100} value={quality} onChange={e=>setQuality(Number(e.target.value))}/></Field>}
+          </>:<>
+            <div className="two-columns settings-section"><Field label="Recording"><select className="field" value={recordingMode} onChange={e=>setRecordingMode(e.target.value as typeof recordingMode)}><option value="autoScroll">Auto scroll</option><option value="static">Static</option></select></Field><Field label="Export"><select className="field" value={output} onChange={e=>setOutput(e.target.value as typeof output)}><option value="mp4">MP4 · H.264</option><option value="webm">WebM</option><option value="both">MP4 + WebM</option></select></Field></div>
+            <div className="settings-section"><span className="section-label">Duration</span><div className="segmented">{[5,10,15,30].map(d=><button key={d} type="button" className={durationSeconds===d?'active':''} aria-pressed={durationSeconds===d} onClick={()=>setDuration(d)}>{d}s</button>)}</div></div>
+            <div className="two-columns"><NumberField label="Custom seconds" value={durationSeconds} min={3} max={30} onChange={setDuration}/>{recordingMode==='autoScroll'&&<Field label="Scroll speed"><select className="field" value={scrollSpeed} onChange={e=>setScrollSpeed(e.target.value as typeof scrollSpeed)}><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></Field>}</div>
+            <Field label="Video resolution"><select className="field" value={videoPreset} disabled={kind==='mobile'||kind==='tablet'||kind==='custom'&&touch} onChange={e=>setVideoPreset(e.target.value as typeof videoPreset)}><option value="device">Use selected viewport</option><option value="1080p">1080p · 1920 × 1080</option><option value="1440p">1440p · 2560 × 1440</option><option value="4k" disabled={!capabilities?.fourKVideo}>4K · {capabilities?.fourKVideo?'3840 × 2160':'Unavailable on this host'}</option></select></Field>
           </>}
-
-          <button onClick={() => setAdvanced((v) => !v)} className="mt-6 flex w-full items-center justify-between rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-sm text-zinc-400 hover:text-white"><span className="flex items-center gap-2"><Settings2 size={15}/>Advanced settings</span><ChevronDown size={15} className={`transition ${advanced ? "rotate-180" : ""}`}/></button>
-          {advanced && <div className="mt-3 space-y-2 rounded-2xl border border-white/8 bg-black/20 p-3"><Field label="Color scheme"><select value={colorScheme} onChange={(e) => setColorScheme(e.target.value as typeof colorScheme)} className="field"><option value="no-preference">System / no preference</option><option value="dark">Dark</option><option value="light">Light</option></select></Field><Toggle checked={hideScrollbars} onChange={setHideScrollbars} label="Hide scrollbars"/><Toggle checked={forceTouch} onChange={setForceTouch} label="Force mobile touch emulation" description="Applies isMobile + hasTouch to the selected viewport"/><Toggle checked={keepAnimations} onChange={setKeepAnimations} label="Keep animations" description="Recommended for video and scroll effects"/><Toggle checked={removeCookiePopup} onChange={setRemoveCookiePopup} label="Remove common cookie popups" description="Best-effort CSS hiding · default off"/><Toggle checked={transparentBackground} onChange={setTransparentBackground} label="Transparent screenshot background" description="PNG works best; site CSS can still paint a background"/><Field label="User Agent override"><input value={userAgent} onChange={(e) => setUserAgent(e.target.value)} className="field" placeholder="Leave empty for device default"/></Field></div>}
-
-          {error && <div className="mt-4 rounded-xl border border-red-400/20 bg-red-400/5 px-4 py-3 text-sm text-red-200">{error}</div>}
-          {job?.status === "error" && <div className="mt-4 rounded-xl border border-red-400/20 bg-red-400/5 px-4 py-3"><p className="text-sm text-red-200">{job.error?.message || "Capture failed."}</p><button onClick={startCapture} className="mt-3 flex items-center gap-2 text-xs text-white"><RefreshCcw size={13}/>Retry</button></div>}
-          {busy && <div className="mt-4"><Progress status={job.status} progress={job.progress} message={job.message}/></div>}
-
-          <button disabled={Boolean(busy)} onClick={startCapture} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-4 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50">{mode === "screenshot" ? <Camera size={17}/> : <Film size={17}/>} {busy ? "Working…" : mode === "screenshot" ? "Capture Website" : "Record Website"}</button>
-          <p className="mt-3 flex items-center justify-center gap-2 text-center text-[11px] text-zinc-600"><Gauge size={12}/>Queue-limited capture · browser/temp files auto-cleaned</p>
-        </section>
-
-        <section className="min-w-0">
-          {job?.status === "ready" && job.result ? <Result job={job} onAgain={startCapture} onChangeDevice={captureAgain} onCopy={() => navigator.clipboard.writeText(job.result?.sourceUrl || url)}/> : <>
-            <DevicePreview kind={device.kind} width={device.width} height={device.height} url={url}/>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3"><Info icon={<Sparkles size={16}/>} title="Native sharpness" text={mode === "screenshot" ? `${device.width * dpr} × ${device.height * dpr} px viewport output at ${dpr}× DPR` : `${device.width} × ${device.height} CSS viewport · video preset controls final recording size`}/><Info icon={<ShieldCheck size={16}/>} title="Safe capture" text="Public HTTP(S) destinations only, with DNS/IP egress blocking."/><Info icon={<Film size={16}/>} title="Real browser" text="Chromium loads fonts, images, responsive CSS and scroll-triggered motion."/></div>
-          </>}
-        </section>
-      </div>
-      <style jsx global>{`.field{width:100%;border:1px solid rgba(255,255,255,.09);background:#080808;border-radius:.75rem;padding:.75rem;color:#e5e5e5;outline:none}.field:focus{border-color:rgba(255,255,255,.28)}`}</style>
-    </main>
-  );
+          <button type="button" className="advanced-toggle" aria-expanded={advanced} aria-controls="advanced-settings" onClick={()=>setAdvanced(!advanced)}><span><SlidersHorizontal size={16}/>Advanced settings</span><ChevronDown size={16} className={advanced?'rotate':''}/></button>
+          {advanced&&<div id="advanced-settings" className="advanced-settings"><div className="two-columns"><Field label="Extra wait"><select className="field" value={waitSeconds} onChange={e=>setWaitSeconds(Number(e.target.value))}>{delays.map(d=><option key={d} value={d}>{d} seconds</option>)}</select></Field><Field label="Appearance"><select className="field" value={colorScheme} onChange={e=>setColorScheme(e.target.value as typeof colorScheme)}><option value="no-preference">Site default</option><option value="light">Light</option><option value="dark">Dark</option></select></Field></div><Toggle label="Hide scrollbars" checked={hideScrollbars} onChange={setHideScrollbars}/><Toggle label="Keep animations" checked={keepAnimations} onChange={setKeepAnimations}/><Toggle label="Mobile touch emulation" description={kind==='mobile'||kind==='tablet'?'Already enabled for this device':'Use mobile layout and touch input'} checked={touch||kind==='mobile'||kind==='tablet'} disabled={kind==='mobile'||kind==='tablet'} onChange={setTouch}/><Toggle label="Hide common cookie popups" description="Optional; some sites may still show a banner" checked={removeCookiePopup} onChange={setRemoveCookiePopup}/>{mode==='screenshot'&&format!=='jpeg'&&<Toggle label="Transparent background" description="Where the website allows transparency" checked={transparent} onChange={setTransparent}/>}<Field label="User agent override"><input className="field" value={userAgent} maxLength={512} onChange={e=>setUserAgent(e.target.value)} placeholder="Use device default"/></Field></div>}
+          <div className="output-summary"><span>{mode==='screenshot'?'Expected output':'Recording size'}</span><strong>{viewport.width*(mode==='screenshot'?dpr:1)} × {mode==='screenshot'&&screenshotType==='fullPage'?'full height':requestedHeight*(mode==='screenshot'?dpr:1)}<span> px</span></strong></div>
+        </fieldset>
+        {error&&<div className="error-box" role="alert">{error}{job&& !['error','ready'].includes(job.status)&&<button type="button" onClick={()=>{setError('');setPolling(true);}}>Check this job again</button>}</div>}
+        {job?.status==='error'&&<div className="error-box" role="alert">{job.error?.message}<span>Adjust the settings below or retry.</span></div>}
+        {busy&&job&&<Progress status={job.status} progress={job.progress} message={job.message}/>}
+        <button type="submit" className="capture-button" disabled={busy}>{busy?<LoaderCircle size={19} className="spin"/>:mode==='screenshot'?<Camera size={19}/>:<Video size={19}/>} {busy?submitting?'Starting capture…':job?.message||'Working…':job?.status==='error'?'Retry capture':mode==='screenshot'?'Capture Website':'Record Website'}{!busy&&<span aria-hidden="true">↗</span>}</button>
+        <p className="retention-note">Downloads are kept for 30 minutes.</p>
+      </form>
+      <section className="preview-panel" ref={resultRef} aria-label="Capture result">
+        <div className="preview-toolbar"><span>{result?'CAPTURE RESULT':'DEVICE FRAME'}</span><span>{result?`${result.format.toUpperCase()} · ${result.width} × ${result.height}`:`${viewport.width} × ${viewport.height}`}</span></div>
+        {result&&job?<>
+          <div className="result-media">{job.type==='screenshot'?<Image unoptimized src={result.previewUrl} alt={`Website screenshot of ${result.sourceUrl}`} width={result.width} height={result.height} className="capture-image"/>:<video src={result.previewUrl} controls playsInline preload="metadata" className="capture-video"/>}</div>
+          <div className="result-details"><div className="result-title"><span className="result-check"><Check size={20}/></span><div><h2>Your capture is ready.</h2><p>{result.deviceLabel}</p></div>{job.type==='screenshot'&&<a className="icon-button" href={result.previewUrl} target="_blank" rel="noreferrer" aria-label="Open original at full resolution"><ArrowUpRight size={20}/></a>}</div>
+            <div className="result-stats">{[['Dimensions',`${result.width} × ${result.height}`],['File size',formatBytes(result.fileSize)],['Pixel ratio',`${result.dpr}× DPR`],['Capture time',`${(result.captureTimeMs/1000).toFixed(1)}s`],...(job.type==='video'?[['Duration',`${result.durationSeconds?.toFixed(2)}s`],['Frame rate',result.frameRate||'25 fps']]:[])].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</div>
+            {result.warnings?.length?<details className="capture-warnings"><summary>{result.warnings.length} loading note(s)</summary><ul>{result.warnings.map((w,i)=><li key={i}>{w}</li>)}</ul></details>:null}
+            <div className="result-actions"><a className="download-button" href={result.downloadUrl}><Download size={18}/>Download {result.format.toUpperCase()}</a>{result.secondaryFile&&<a className="secondary-button" href={result.secondaryFile.downloadUrl}><Download size={17}/>WebM</a>}</div>
+            <div className="result-utilities"><button onClick={()=>void startCapture()}><RotateCcw size={15}/>Capture again</button><button onClick={()=>{setJob(null);document.querySelector('.settings-panel')?.scrollIntoView({behavior:'smooth'});}}>Change device</button><button onClick={async()=>{try{await navigator.clipboard.writeText(result.sourceUrl);setCopied(true);setTimeout(()=>setCopied(false),2500);}catch{setError('Clipboard unavailable. The original URL is shown below.');}}}>{copied?<Check size={15}/>:<Link2 size={15}/>} {copied?'Copied':'Copy URL'}</button></div><p className="source-url">{result.sourceUrl}</p><p className="retention-note">Download now. This capture expires after 30 minutes.</p>
+          </div>
+        </>:<><DevicePreview kind={kind} width={viewport.width} height={viewport.height} url={url}/><div className="preview-caption"><span className="small-mark"><Camera size={20}/></span><h2>{busy?'Getting every pixel ready.':'Ready when you are.'}</h2><p>{busy?'Your capture will appear here when processing finishes.':'Paste a URL, choose a device, and capture.'}</p></div><div className="preview-footer"><span>Actual viewport rendering</span><span>{mode==='screenshot'?`${dpr}× pixel density`:'Native browser motion'}</span><span>{mode==='screenshot'?format.toUpperCase():output==='both'?'MP4 + WebM':output.toUpperCase()}</span></div></>}
+      </section>
+    </div>
+    <footer className="studio-footer"><span>SiteCapture Studio</span><span>Rendered with Chromium. Made for the details.</span></footer>
+  </main>;
 }
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-2 block text-xs text-zinc-500">{label}</span>{children}</label>; }
-function NumberField({ label, value, min, max, onChange, type = "number" }: { label: string; value: number; min: number; max: number; onChange: (n: number) => void; type?: "number" | "range" }) { return <Field label={label}><input type={type} value={value} min={min} max={max} onChange={(e) => onChange(Number(e.target.value))} className="field"/></Field>; }
-function Info({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) { return <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4"><div className="mb-3 text-zinc-400">{icon}</div><h3 className="text-sm text-zinc-200">{title}</h3><p className="mt-1 text-xs leading-5 text-zinc-600">{text}</p></div>; }
-
-function Result({ job, onAgain, onChangeDevice, onCopy }: { job: CaptureJob; onAgain: () => void; onChangeDevice: () => void; onCopy: () => void }) {
-  const result = job.result!;
-  return <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#101010]">
-    <div className="flex items-center justify-between border-b border-white/8 px-5 py-4"><div><p className="text-xs uppercase tracking-[.14em] text-zinc-600">Capture complete</p><h2 className="mt-1 text-lg font-medium">Ready to use</h2></div><span className="rounded-full border border-emerald-400/20 bg-emerald-400/5 px-3 py-1 text-xs text-emerald-300">Ready</span></div>
-    <div className="grid min-h-[420px] place-items-center bg-black p-4">{job.type === "screenshot" ? <img src={result.previewUrl} alt="Website capture" className="max-h-[650px] max-w-full rounded-xl border border-white/10 object-contain"/> : <video src={result.previewUrl} controls autoPlay muted playsInline className="max-h-[650px] max-w-full rounded-xl border border-white/10"/>}</div>
-    <div className="grid grid-cols-2 gap-px bg-white/8 sm:grid-cols-4">{[["Dimensions",`${result.width} × ${result.height}`],["File size",bytes(result.fileSize)],["Device",result.deviceLabel],["Capture time",`${(result.captureTimeMs/1000).toFixed(1)}s`]].map(([k,v]) => <div key={k} className="bg-[#101010] p-4"><p className="text-[10px] uppercase tracking-wider text-zinc-600">{k}</p><p className="mt-1 truncate text-xs text-zinc-300">{v}</p></div>)}</div>
-    <div className="flex flex-wrap gap-2 p-4"><a href={result.downloadUrl} className="flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black"><Download size={16}/>Download {result.format.toUpperCase()}</a>{result.secondaryFile && <a href={result.secondaryFile.downloadUrl} className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300"><Download size={16}/>Download {result.secondaryFile.format.toUpperCase()}</a>}<button onClick={onAgain} className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300"><RefreshCcw size={15}/>Capture Again</button><button onClick={onChangeDevice} className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300"><Settings2 size={15}/>Change Device</button><button onClick={onCopy} className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300"><Clipboard size={15}/>Copy Original URL</button></div>
-  </div>;
-}
+function Field({label,children}:{label:string;children:React.ReactNode}) {return <label className="form-field"><span>{label}</span>{children}</label>;}
+function NumberField({label,value,min,max,onChange}:{label:string;value:number;min:number;max:number;onChange:(v:number)=>void}) {return <Field label={label}><input className="field" type="number" value={Number.isNaN(value)?'':value} required min={min} max={max} onChange={e=>onChange(e.target.valueAsNumber)}/></Field>;}
+function Toggle({label,description,checked,disabled,onChange}:{label:string;description?:string;checked:boolean;disabled?:boolean;onChange:(v:boolean)=>void}) {return <label className="toggle-row"><span>{label}{description&&<small>{description}</small>}</span><input type="checkbox" role="switch" checked={checked} disabled={disabled} onChange={e=>onChange(e.target.checked)}/></label>;}

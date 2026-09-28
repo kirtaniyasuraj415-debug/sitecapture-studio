@@ -4,17 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "npm run build && node --watch dist/worker/src/server.js",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/worker/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "tsc -p tsconfig.smoke.json && node dist-smoke/tests/engine-cases.js && node dist-smoke/tests/integration-smoke.js"
+    "smoke": "npm run smoke:fixtures && npm run smoke:live",
+    "smoke:fixtures": "tsc -p tsconfig.smoke.json && node dist-smoke/worker/src/tests/engine-cases.js",
+    "smoke:live": "tsc -p tsconfig.smoke.json && node dist-smoke/worker/src/tests/integration-smoke.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
     "fastify": "^5.6.0",
+    "ipaddr.js": "2.5.0",
     "playwright": "1.63.0",
+    "sharp": "0.35.4",
     "zod": "^4.1.5"
   },
   "devDependencies": {

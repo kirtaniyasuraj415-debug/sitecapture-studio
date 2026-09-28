@@ -11,7 +11,10 @@ export async function findFile(id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const entries = await readdir(TEMP_DIR);
   const name = entries.find((entry) => entry.startsWith(`${id}.`));
-  return name ? path.join(TEMP_DIR, name) : null;
+  if (!name) return null;
+  const file = path.join(TEMP_DIR, name);
+  try { if (Date.now() - (await stat(file)).mtimeMs > FILE_TTL_MS) { await rm(file, { force: true }); return null; } } catch { return null; }
+  return file;
 }
 export async function cleanupFiles() {
   await ensureTemp();

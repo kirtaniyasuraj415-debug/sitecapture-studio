@@ -29,7 +29,7 @@ export class JobStore {
   }
   cleanup(maxAgeMs: number) {
     const cutoff = Date.now() - maxAgeMs;
-    for (const [id, job] of this.jobs) if (new Date(job.createdAt).getTime() < cutoff) this.jobs.delete(id);
+    for (const [id, job] of this.jobs) if (["ready","error"].includes(job.status) && new Date(job.updatedAt).getTime() < cutoff) this.jobs.delete(id);
   }
 }
 
@@ -55,6 +55,6 @@ export class JobQueue {
 }
 
 export const jobs = new JobStore();
-const concurrency = Math.max(1, Math.min(2, Number(process.env.CAPTURE_CONCURRENCY || 1)));
-const maxQueued = Math.max(concurrency, Number(process.env.MAX_QUEUE_LENGTH || 20));
+const concurrency = Math.max(1, Math.min(2, Number(process.env.CAPTURE_CONCURRENCY || 1) || 1));
+const maxQueued = Math.max(concurrency, Number(process.env.MAX_QUEUE_LENGTH || 4));
 export const queue = new JobQueue(concurrency, maxQueued);

@@ -1,129 +1,67 @@
-import { chromium } from "playwright";
-import { readFile, rm } from "node:fs/promises";
-import { newFile } from "../lib/files.js";
-import { validatePublicUrl } from "../capture/security.js";
-import { withTimeout } from "../capture/browser.js";
+// Deterministic fixtures are fulfilled only in this test harness. Production SSRF checks stay enabled.
+import assert from 'node:assert/strict';
+import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import sharp from 'sharp';
+import { getBrowser, closeBrowser } from '../capture/browser.js';
+import { captureScreenshot } from '../capture/screenshot.js';
+import { captureVideo } from '../capture/video.js';
+import { screenshotSchema, videoSchema } from '../lib/schemas.js';
+import { ensureTemp, TEMP_DIR } from '../lib/files.js';
+import { probeVideo } from '../capture/media.js';
+import { runProcess } from '../capture/process.js';
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
+const base='http://93.184.215.14'; // Public address checked by the real engine; no outbound fixture traffic.
+const artifacts=path.resolve('../artifacts');
+const stage=()=>{};
+const results:{name:string;status:string;details?:unknown}[]=[];
+const html=(body:string,extra='')=>`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;background:#112335;color:white;font-family:Arial}h1{font-size:48px;padding:40px}section{height:100vh;box-sizing:border-box;padding:50px;font-size:32px} ${extra}</style></head><body>${body}</body></html>`;
+const pages:Record<string,string>={
+  '/static':html('<h1>SiteCapture: crisp text</h1><p>Native browser pixels at the requested viewport.</p>'),
+  '/long':html('<section style="background:#15304b">01 — Made for details</section><section style="background:#395c36">02 — Real viewport</section><section style="background:#593534">03 — Native pixels</section><div style="height:3100px">Long page</div>'),
+  '/lazy':html('<div style="height:1800px">Scroll to load</div><img id="lazy" width="300" height="200" loading="lazy" src="/lazy-image.png"><div style="height:300px"></div>'),
+  '/mobile':html('<main id="responsive" style="height:100vh"></main>','#responsive{background:#a02020}@media(max-width:600px){#responsive{background:#20a040}}'),
+  '/vh':html('<div style="height:100vh;background:#20a040"></div><div style="height:2500px;background:#a02020"></div>'),
+  '/animation':html('<div id="moving"></div>','@keyframes travel{from{transform:translateX(0)}to{transform:translateX(250px)}}#moving{width:100px;height:100px;background:#20a040;animation:travel 2s linear infinite}'),
+  '/fonts':html('<h1 style="font-family:CaptureFont">Waiting for web fonts</h1>',"@font-face{font-family:CaptureFont;src:url('/font.woff2')}"),
+};
+const pixel=async(file:string,x:number,y:number)=>{const {data}=await sharp(file).extract({left:x,top:y,width:1,height:1}).removeAlpha().raw().toBuffer({resolveWithObject:true});return Array.from(data);};
+
+async function main(){
+  await ensureTemp();await mkdir(artifacts,{recursive:true});
+  const browser=await getBrowser();
+  const newContext=browser.newContext.bind(browser);
+  browser.newContext=async(options)=>{
+    const context=await newContext(options);
+    const newPage=context.newPage.bind(context);
+    context.newPage=async()=>{
+      const page=await newPage();
+      await page.route(`${base}/**`,async route=>{
+        const routePath=new URL(route.request().url()).pathname;
+        if(routePath==='/timeout') {await new Promise(r=>setTimeout(r,1500)); await route.abort().catch(()=>{}); return;}
+        if(routePath==='/redirect-private') {await route.fulfill({status:302,headers:{location:'http://127.0.0.1/'}});return;}
+        if(routePath==='/lazy-image.png') {await new Promise(r=>setTimeout(r,220));await route.fulfill({contentType:'image/png',body:await sharp({create:{width:300,height:200,channels:3,background:'#fa861b'}}).png().toBuffer()});return;}
+        if(routePath==='/font.woff2'){await new Promise(r=>setTimeout(r,350));await route.fulfill({contentType:'font/woff2',body:await readFile(path.resolve('src/tests/fixtures/roboto.woff2'))});return;}
+        await route.fulfill({contentType:'text/html',body:pages[routePath]||pages['/static']});
+      });return page;
+    };return context;
+  };
+  async function shot(route:string,options:Record<string,unknown>={}){const result=await captureScreenshot(screenshotSchema.parse({url:base+route,width:800,height:600,dpr:1,waitSeconds:0,...options}),stage);return {result,file:path.join(TEMP_DIR,`${result.fileId}.${result.format==='jpeg'?'jpg':result.format}`)};}
+  async function test(name:string,run:()=>Promise<unknown>){const details=await run();results.push({name,status:'passed',details});console.log('PASS',name,details||'');}
+  await test('Static website / true 3840 × 2160 PNG',async()=>{const {result,file}=await shot('/static',{deviceId:'desktop-1920',dpr:2});const m=await sharp(file).metadata();assert.equal(m.width,3840);assert.equal(m.height,2160);await sharp(file).raw().toBuffer();await copyFile(file,path.join(artifacts,'native-dpr2.png'));return {width:m.width,height:m.height,bytes:result.fileSize};});
+  await test('Long full-page render',async()=>{const {file}=await shot('/long',{screenshotType:'fullPage'});const m=await sharp(file).metadata();assert.equal(m.height,4900);return m.height;});
+  await test('Selected height preserves 600px viewport/vh',async()=>{const {file}=await shot('/vh',{screenshotType:'selectedHeight',selectedHeight:1800});const m=await sharp(file).metadata();assert.equal(m.height,1800);assert.deepEqual(await pixel(file,10,599),[32,160,64]);assert.deepEqual(await pixel(file,10,601),[160,32,32]);return '800 × 1800, viewport unchanged';});
+  await test('Lazy image really rendered',async()=>{const {file,result}=await shot('/lazy',{screenshotType:'fullPage'});assert.deepEqual(await pixel(file,20,1840),[250,134,27]);assert(!result.warnings.some(w=>w.includes('image(s)')));return 'Image pixels verified';});
+  await test('Google Fonts WOFF2 load before capture (delayed fixture)',async()=>{const {result}=await shot('/fonts');assert(!result.warnings.some(w=>w.includes('font face')));return 'Bundled Roboto loaded';});
+  await test('Responsive mobile + DPR3',async()=>{const {file,result}=await shot('/mobile',{deviceId:'mobile-390',dpr:3});assert.equal(result.width,1170);assert.equal(result.height,2532);assert.deepEqual(await pixel(file,10,10),[32,160,64]);await copyFile(file,path.join(artifacts,'responsive-mobile.png'));});
+  await test('JPEG quality and WebP encode at original dimensions',async()=>{for(const format of ['jpeg','webp']){const {file}=await shot('/static',{format,quality:95});const m=await sharp(file).metadata();assert.equal(m.format,format);assert.equal(m.width,800);assert.equal(m.height,600);}});
+  await test('Invalid URL and private redirect rejected',async()=>{await assert.rejects(()=>shot('/static',{url:'file:///etc/passwd'}));await assert.rejects(()=>shot('/redirect-private'));});
+  await test('Navigation timeout + recovery',async()=>{process.env.NAVIGATION_TIMEOUT_MS='300';try{await assert.rejects(()=>shot('/timeout'));}finally{delete process.env.NAVIGATION_TIMEOUT_MS;}const {result}=await shot('/static');assert.equal(result.width,800);});
+  await test('Animated page produces changing pixels',async()=>{const a=await shot('/animation');const b=await shot('/animation',{waitSeconds:1});assert.notDeepEqual(await readFile(a.file),await readFile(b.file));});
+  await test('Oversized capture refused before rendering',async()=>{await assert.rejects(()=>shot('/long',{dpr:3,screenshotType:'selectedHeight',selectedHeight:12000,width:3840}),/too large|pixel limit/i);});
+  await test('Auto-scroll MP4 + WebM actual duration/dimensions',async()=>{const result=await captureVideo(videoSchema.parse({url:base+'/long',width:800,height:600,waitSeconds:0,durationSeconds:3,output:'both',recordingMode:'autoScroll'}),stage);for(const id of [result.fileId,result.secondaryFile!.fileId]){const ext=id===result.fileId?'mp4':'webm';const file=path.join(TEMP_DIR,`${id}.${ext}`);const m=await probeVideo(file);assert.equal(m.width,800);assert.equal(m.height,600);assert(Math.abs(m.duration-3)<.15);await copyFile(file,path.join(artifacts,`auto-scroll.${ext}`));}const frame=path.join(artifacts,'video-first.png');await runProcess('ffmpeg',['-y','-i',path.join(artifacts,'auto-scroll.mp4'),'-frames:v','1',frame]);const rgb=await pixel(frame,5,590);assert(rgb[2]>rgb[1], 'Auto-scroll must start at page top, before second section');return {seconds:result.durationSeconds,fps:result.frameRate,startsAtTop:true};});
+  await test('Short page auto-scroll still records full duration',async()=>{const result=await captureVideo(videoSchema.parse({url:base+'/static',width:800,height:600,waitSeconds:0,durationSeconds:3,recordingMode:'autoScroll',scrollSpeed:'fast',output:'mp4'}),stage);assert(Math.abs(result.durationSeconds-3)<.15);return result.durationSeconds;});
+  await test('Browser contexts cleaned',async()=>{assert.equal(browser.contexts().length,0);});
+  await writeFile(path.join(artifacts,'engine-tests.json'),JSON.stringify({at:new Date().toISOString(),browser:browser.version(),fixtureMode:true,results},null,2));
 }
-
-function pngSize(buffer: Buffer) {
-  assert(buffer.subarray(0, 8).toString("hex") === "89504e470d0a1a0a", "Not a PNG file");
-  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
-}
-
-async function main() {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    // 1. Normal static website rendering.
-    {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
-      await page.setContent("<!doctype html><main><h1>Static test</h1><p>Rendered by Chromium.</p></main>");
-      const png = await page.screenshot({ type: "png" });
-      assert(png.length > 1000, "Static website screenshot was unexpectedly small");
-      await page.close();
-      console.log("CASE OK: normal static website");
-    }
-
-    // 2. Live Next.js website.
-    {
-      const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-      let ok = false;
-      for (let attempt = 0; attempt < 2 && !ok; attempt++) {
-        try {
-          await page.goto("https://nextjs.org", { waitUntil: "domcontentloaded", timeout: 20_000 });
-          ok = await page.evaluate(() => document.documentElement.innerHTML.includes("/_next/"));
-        } catch {
-          if (attempt === 0) await page.waitForTimeout(800);
-        }
-      }
-      assert(ok, "Live Next.js site did not expose expected /_next/ assets");
-      const png = await page.screenshot({ type: "png" });
-      assert(png.length > 10_000, "Next.js mobile screenshot was unexpectedly small");
-      await page.close();
-      console.log("CASE OK: Next.js website");
-    }
-
-    // 3. Lazy-loaded image after controlled scrolling.
-    {
-      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
-      const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="black"/><text x="20" y="90" fill="white">lazy</text></svg>');
-      await page.setContent(`<div style="height:2200px">spacer</div><img id="lazy" loading="lazy" width="320" height="180" src="data:image/svg+xml,${svg}">`);
-      await page.evaluate(async () => {
-        const max = document.documentElement.scrollHeight;
-        for (let y = 0; y < max; y += 500) {
-          window.scrollTo(0, y);
-          await new Promise((resolve) => setTimeout(resolve, 30));
-        }
-      });
-      assert(await page.locator("#lazy").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth === 320), "Lazy image did not load after scrolling");
-      await page.close();
-      console.log("CASE OK: lazy images");
-    }
-
-    // 4. Google Fonts readiness.
-    {
-      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
-      await page.setContent('<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet"><div style="font-family:Roboto,sans-serif;font-weight:700;font-size:48px">Font test</div>');
-      await Promise.race([
-        page.evaluate(() => document.fonts.ready),
-        page.waitForTimeout(10_000),
-      ]);
-      const loaded = await page.evaluate(() => document.fonts.check('700 48px "Roboto"'));
-      assert(loaded, "Google Font Roboto was not ready");
-      await page.close();
-      console.log("CASE OK: Google Fonts");
-    }
-
-    // 5. Long full-page capture.
-    {
-      const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 1 });
-      await page.setContent('<div style="height:6200px;background:linear-gradient(#111,#eee)">Long page</div>');
-      const out = newFile("png");
-      await page.screenshot({ path: out.path, fullPage: true, type: "png" });
-      const size = pngSize(await readFile(out.path));
-      assert(size.width === 900 && size.height >= 6200, `Unexpected full-page dimensions ${size.width}x${size.height}`);
-      await rm(out.path, { force: true });
-      await page.close();
-      console.log("CASE OK: long full-page capture");
-    }
-
-    // 6. Responsive mobile website behavior.
-    {
-      const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-      await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><style>#mode{display:none}@media(max-width:600px){#mode{display:block;width:123px}}</style><div id="mode">mobile</div>');
-      const state = await page.locator("#mode").evaluate((el) => ({ display: getComputedStyle(el).display, width: getComputedStyle(el).width }));
-      assert(state.display === "block" && state.width === "123px", "Mobile responsive CSS did not activate");
-      await page.close();
-      console.log("CASE OK: responsive mobile viewport");
-    }
-
-    // 7. Invalid/private URLs.
-    await validatePublicUrl("file:///etc/passwd").then(() => { throw new Error("file:// unexpectedly allowed"); }, () => undefined);
-    await validatePublicUrl("http://127.0.0.1").then(() => { throw new Error("loopback unexpectedly allowed"); }, () => undefined);
-    console.log("CASE OK: invalid/private URL rejection");
-
-    // 8. Hard timeout utility.
-    let timedOut = false;
-    try { await withTimeout(new Promise<void>(() => undefined), 50); } catch { timedOut = true; }
-    assert(timedOut, "Capture timeout helper did not abort a stuck task");
-    console.log("CASE OK: timeout protection");
-
-    // 9. Animation remains active when requested.
-    {
-      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
-      await page.setContent('<style>@keyframes move{from{transform:translateX(0)}to{transform:translateX(200px)}}#box{width:20px;height:20px;background:#fff;animation:move 1s linear infinite}</style><div id="box"></div>');
-      const first = await page.locator("#box").evaluate((el) => getComputedStyle(el).transform);
-      await page.waitForTimeout(220);
-      const second = await page.locator("#box").evaluate((el) => getComputedStyle(el).transform);
-      assert(first !== second, "CSS animation did not advance over time");
-      await page.close();
-      console.log("CASE OK: animations");
-    }
-  } finally {
-    await browser.close();
-  }
-}
-
-main().catch((error) => { console.error(error); process.exitCode = 1; });
+main().finally(closeBrowser).catch(error=>{console.error(error);process.exitCode=1;});

@@ -2,8 +2,29 @@ import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 import net from "node:net";
 import type { Duplex } from "node:stream";
-import { resolvePublicHost, validatePublicUrl } from "./security.js";
+import { resolvePublicHost, validatePublicUrl, parsePublicUrl } from "./security.js";
 
+import { CaptureError } from "../lib/errors.js";
+
+const sockets = new Set<net.Socket>();
+let receivedBytes = 0;
+let exceededBudget = false;
+const limitBytes = () => Number(process.env.MAX_PAGE_TRANSFER_BYTES || 100 * 1024 * 1024);
+export function assertEgressBudget() {
+  if (exceededBudget) throw new CaptureError('RESOURCE_LIMIT', 'Website exceeded the network transfer limit.');
+}
+function track(socket: net.Socket, incoming = false) {
+  sockets.add(socket);
+  socket.once('close', () => sockets.delete(socket));
+  socket.on('error', () => {});
+  socket.setTimeout(30_000, () => socket.destroy());
+  if (sockets.size > 256) { exceededBudget = true; for (const s of sockets) s.destroy(); }
+  if (incoming) socket.on('data', (data: Buffer) => {
+    receivedBytes += data.length;
+    if (receivedBytes > limitBytes()) { exceededBudget = true; for (const s of sockets) s.destroy(); }
+  });
+  return socket;
+}
 let proxyPromise: Promise<{ url: string; close: () => Promise<void> }> | null = null;
 
 function safeHeaders(headers: IncomingMessage["headers"], host: string) {
@@ -51,6 +72,9 @@ async function proxyHttpRequest(req: IncomingMessage, res: http.ServerResponse) 
           upstreamRes.pipe(res);
         });
     upstream.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    upstream.setTimeout(20_000, () => upstream.destroy());
+    upstream.on("socket", (socket) => track(socket, true));
+    res.once("close", () => upstream.destroy());
     req.pipe(upstream);
   } catch {
     res.writeHead(403, { "content-type": "text/plain", "connection": "close" });
@@ -60,11 +84,11 @@ async function proxyHttpRequest(req: IncomingMessage, res: http.ServerResponse) 
 
 async function proxyConnect(req: IncomingMessage, clientSocket: Duplex, head: Buffer) {
   try {
-    const target = new URL(`http://${req.url}`);
+    const target = parsePublicUrl(`https://${req.url}`);
     const resolved = await resolvePublicHost(target.hostname);
     const port = Number(target.port || 443);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
-    const upstream = net.connect({ host: resolved.address, port, family: resolved.family });
+    const upstream = track(net.connect({ host: resolved.address, port, family: resolved.family }), true);
     upstream.setTimeout(20_000);
     upstream.once("connect", () => {
       clientSocket.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: SiteCapture\r\n\r\n");
@@ -75,6 +99,8 @@ async function proxyConnect(req: IncomingMessage, clientSocket: Duplex, head: Bu
     upstream.once("timeout", () => upstream.destroy());
     upstream.once("error", () => rejectSocket(clientSocket, "502 Bad Gateway"));
     clientSocket.once("error", () => upstream.destroy());
+    clientSocket.once("close", () => upstream.destroy());
+    upstream.once("close", () => clientSocket.destroy());
   } catch {
     rejectSocket(clientSocket);
   }
@@ -86,7 +112,7 @@ async function proxyUpgrade(req: IncomingMessage, clientSocket: Duplex, head: Bu
     await validatePublicUrl(target.toString());
     const resolved = await resolvePublicHost(target.hostname);
     const port = Number(target.port || 80);
-    const upstream = net.connect({ host: resolved.address, port, family: resolved.family });
+    const upstream = track(net.connect({ host: resolved.address, port, family: resolved.family }), true);
     upstream.setTimeout(20_000);
     upstream.once("connect", () => {
       const headerLines = Object.entries(safeHeaders(req.headers, target.host))
@@ -111,13 +137,14 @@ export function getEgressProxy() {
       const server = http.createServer((req, res) => { void proxyHttpRequest(req, res); });
       server.on("connect", (req, socket, head) => { void proxyConnect(req, socket, head); });
       server.on("upgrade", (req, socket, head) => { void proxyUpgrade(req, socket, head); });
+      server.on("connection", (socket) => track(socket));
       server.on("error", reject);
       server.listen(0, "127.0.0.1", () => {
         const address = server.address();
         if (!address || typeof address === "string") return reject(new Error("Could not start egress proxy"));
         resolve({
           url: `http://127.0.0.1:${address.port}`,
-          close: () => new Promise<void>((done) => server.close(() => done())),
+          close: () => new Promise<void>((done) => { for (const socket of sockets) socket.destroy(); server.close(() => done()); }),
         });
       });
     });
@@ -127,5 +154,5 @@ export function getEgressProxy() {
 
 export async function closeEgressProxy() {
   if (!proxyPromise) return;
-  try { await (await proxyPromise).close(); } finally { proxyPromise = null; }
+  try { await (await proxyPromise).close(); } finally { proxyPromise = null; receivedBytes = 0; exceededBudget = false; }
 }

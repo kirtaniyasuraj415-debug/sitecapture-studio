@@ -2,25 +2,37 @@ services:
   worker:
     image: sitecapture-studio-worker:local
     build:
-      context: ./worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: worker/Dockerfile
     environment:
       PORT: 8787
       HOST: 0.0.0.0
-      ALLOWED_ORIGINS: http://localhost:3000
+      CAPTURE_API_KEY: ${CAPTURE_API_KEY:-}
       CAPTURE_CONCURRENCY: 1
-      MAX_QUEUE_LENGTH: 20
+      MAX_QUEUE_LENGTH: 4
+      CAPTURE_TIMEOUT_MS: 75000
+      VIDEO_TIMEOUT_MS: 150000
       FILE_TTL_MS: 1800000
       MAX_PAGE_TRANSFER_BYTES: 104857600
       MAX_OUTPUT_FILE_BYTES: 262144000
-      ENABLE_4K_VIDEO: "false"
+      ENABLE_4K_VIDEO: ${ENABLE_4K_VIDEO:-false}
       MAX_VIDEO_RENDER_PIXELS: 10000000
       MAX_SCREENSHOT_PIXELS: 100000000
-    shm_size: "1gb"
-    ports:
-      - "8787:8787"
+      CHROMIUM_NO_SANDBOX: "false"
+    shm_size: 1gb
+    mem_limit: 4g
+    cpus: 2
+    pids_limit: 256
+    security_opt:
+      - seccomp=./worker/seccomp_profile.json
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
-
   web:
     image: sitecapture-studio-web:local
     build:
@@ -28,9 +40,14 @@ services:
       dockerfile: Dockerfile
     environment:
       CAPTURE_WORKER_URL: http://worker:8787
-      CAPTURE_PUBLIC_WORKER_URL: http://localhost:8787
+      CAPTURE_WORKER_API_KEY: ${CAPTURE_API_KEY:-}
+      SITE_PASSWORD: ${SITE_PASSWORD:-}
+      HOSTNAME: 0.0.0.0
     depends_on:
-      - worker
+      worker:
+        condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    init: true
+    mem_limit: 768m
     restart: unless-stopped

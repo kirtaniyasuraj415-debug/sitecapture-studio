@@ -11,3 +11,7 @@ test-results
 *.log
 .DS_Store
 .vercel
+
+worker/dist-smoke
+*.tsbuildinfo
+artifacts

@@ -1,77 +1,73 @@
-name: CI
+name: Build and real capture verification
 on:
   push:
     branches: [main]
   pull_request:
-
+permissions:
+  contents: read
 jobs:
-  web:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHROMIUM_NO_SANDBOX: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
-      - run: npm run build
-      - run: npm run lint
-
-  worker:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: worker
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            worker/package-lock.json
+      - run: npm ci --no-audit --no-fund && npm --prefix worker ci --no-audit --no-fund
+      - run: npm run lint && npm run build && npm run worker:build && npm test
+      - run: cd worker && npx playwright install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: npm run build
-      - run: npm test
-      - run: npm run smoke
-
+      - name: Deterministic engine cases and actual public websites
+        run: npm --prefix worker run smoke
+      - name: Mobile and desktop UI, real backend rejection/retry
+        run: bash scripts/test-local.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-verification
+          path: artifacts/
+          retention-days: 14
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Build web image
-        run: docker build -t sitecapture-studio-web:local .
-      - name: Build worker image
-        run: docker build -t sitecapture-studio-worker:local ./worker
-      - name: Start production compose stack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build exact production images
+        run: docker compose build
+      - name: Start sandboxed production stack
         run: docker compose up -d --no-build
-      - name: Wait for stack
+      - name: Wait for the frontend and worker
         run: |
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8787/health >/dev/null && curl -fsS http://localhost:3000 >/dev/null; then
-              exit 0
-            fi
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000/health >/dev/null; then exit 0; fi
             sleep 2
           done
           docker compose logs
           exit 1
-      - name: End-to-end screenshot through web API
-        run: |
-          curl -fsS -X POST http://localhost:3000/api/capture/screenshot             -H 'content-type: application/json'             --data '{"url":"https://example.com","deviceId":"desktop-1366","dpr":1,"waitSeconds":0,"format":"png","screenshotType":"viewport"}'             > /tmp/job.json
-          JOB_ID=$(python3 -c 'import json; print(json.load(open("/tmp/job.json"))["id"])')
-          STATUS=""
-          for i in {1..60}; do
-            curl -fsS "http://localhost:3000/api/jobs/$JOB_ID" > /tmp/state.json
-            STATUS=$(python3 -c 'import json; print(json.load(open("/tmp/state.json")).get("status",""))')
-            if [ "$STATUS" = "ready" ]; then break; fi
-            if [ "$STATUS" = "error" ]; then cat /tmp/state.json; exit 1; fi
-            sleep 2
-          done
-          test "$STATUS" = "ready"
-          FILE_ID=$(python3 -c 'import json; print(json.load(open("/tmp/state.json"))["result"]["fileId"])')
-          curl -fsSL "http://localhost:3000/api/files/$FILE_ID" -o /tmp/capture.png
-          python3 -c 'import struct; d=open("/tmp/capture.png","rb").read(24); assert d[:8] == bytes.fromhex("89504e470d0a1a0a"); w,h=struct.unpack(">II",d[16:24]); assert (w,h)==(1366,768), (w,h); print(f"Compose PNG OK: {w}x{h}")'
-      - name: Show compose logs on failure
-        if: failure()
+      - name: Capture actual website through production APIs
+        run: node scripts/api-check.mjs
+      - name: Build single-container distribution
+        run: docker build -f Dockerfile.single -t sitecapture-studio:single .
+      - name: Show logs
+        if: always()
         run: docker compose logs
-      - name: Stop compose stack
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-verification
+          path: artifacts/
+          retention-days: 14
+      - name: Cleanup
         if: always()
         run: docker compose down -v
